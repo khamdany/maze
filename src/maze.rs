@@ -77,6 +77,9 @@ pub struct MazeState {
     pub solution: Vec<Pos>,
     pub facing: Direction,
     pub visited: HashSet<Pos>,
+    /// Previous player positions, newest last; used for one-step retracing.
+    #[serde(default)]
+    pub move_history: Vec<Pos>,
     pub moves: u64,
     pub elapsed_ms: u64,
     pub completed: bool,
@@ -91,6 +94,9 @@ pub struct MazeState {
     pub map_revealed: HashSet<Pos>,
     #[serde(default)]
     pub hint_cells: HashSet<Pos>,
+    /// Whether the goal marker has been explicitly revealed by a token.
+    #[serde(default)]
+    pub goal_revealed: bool,
     #[serde(default)]
     pub items_enabled: bool,
     #[serde(default)]
@@ -160,9 +166,9 @@ impl MazeState {
         let mut visited = HashSet::new();
         visited.insert(start);
         let mut state = Self { schema_version: 2, algorithm_version: 2, width, height, seed, start, exit_pos, start_mode, generation_mode,
-            extra_passages: extra_passages.min(100), player: start, solution: Vec::new(), facing: Direction::Right, visited, moves: 0, elapsed_ms: 0,
+            extra_passages: extra_passages.min(100), player: start, solution: Vec::new(), facing: Direction::Right, visited, move_history: Vec::new(), moves: 0, elapsed_ms: 0,
             completed: false, show_trail: true, visibility_mode: VisibilityMode::FullMap, vision_radius: 5,
-            explored: HashSet::from([start]), map_revealed: HashSet::new(), hint_cells: HashSet::new(),
+            explored: HashSet::from([start]), map_revealed: HashSet::new(), hint_cells: HashSet::new(), goal_revealed: false,
             items_enabled: true, teleporter_enabled: true, hint_enabled: true, map_reveal_enabled: true, tokens_enabled: true,
             items_per_type: 3, items: Vec::new(), tokens_collected: 0, hint_steps: 5,
             zoom: 1.0, pan_x: 0.0, pan_y: 0.0 };
@@ -249,6 +255,7 @@ impl MazeState {
     pub fn move_player(&mut self, dir: Direction) -> bool {
         if self.completed || !self.can_move(self.player, dir) { return false; }
         let (dx,dy) = dir.delta();
+        self.move_history.push(self.player);
         self.player = Pos { x: self.player.x + dx, y: self.player.y + dy };
         self.facing = dir;
         self.moves = self.moves.saturating_add(1);
@@ -257,8 +264,18 @@ impl MazeState {
         self.completed = self.player == self.exit();
         true
     }
+    pub fn retrace_step(&mut self) -> bool {
+        let Some(previous) = self.move_history.pop() else { return false; };
+        self.player = previous;
+        self.completed = false;
+        self.moves = self.moves.saturating_sub(1);
+        self.solution.clear();
+        self.reveal_visible_area();
+        true
+    }
     pub fn reset_player(&mut self) {
         self.player = self.start;
+        self.move_history.clear();
         self.solution.clear();
         self.facing = Direction::Right;
         self.visited.clear();
@@ -267,6 +284,7 @@ impl MazeState {
         self.explored.insert(self.player);
         self.map_revealed.clear();
         self.hint_cells.clear();
+        self.goal_revealed = false;
         self.tokens_collected = 0;
         for item in &mut self.items { item.collected = false; }
         self.reveal_visible_area();
@@ -340,6 +358,7 @@ impl MazeState {
         if self.hint_cells.len() > 1_000_000 || self.hint_cells.iter().any(|p| p.x < 0 || p.y < 0 || p.x >= self.width || p.y >= self.height) { return Err("Hint route contains invalid or excessive coordinates".into()); }
         if self.explored.len() > 50_000_000 { return Err("Explored map exceeds safe loading limit".into()); }
         if self.explored.iter().any(|p| p.x < 0 || p.y < 0 || p.x >= self.width || p.y >= self.height) { return Err("Explored map contains an invalid coordinate".into()); }
+        if self.move_history.len() > 50_000_000 || self.move_history.iter().any(|p| p.x < 0 || p.y < 0 || p.x >= self.width || p.y >= self.height) { return Err("Move history contains invalid or excessive coordinates".into()); }
         if self.visited.len() > 50_000_000 { return Err("Visited trail exceeds safe loading limit".into()); }
         if self.visited.iter().any(|p| p.x < 0 || p.y < 0 || p.x >= self.width || p.y >= self.height) {
             return Err("Trail contains an invalid coordinate".into());

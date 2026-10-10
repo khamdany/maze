@@ -133,4 +133,14 @@ New mazes can optionally place randomized items throughout reachable cells. The 
 - **Exploration token** (green): consumed on pickup and counted in the run statistics.
 
 Item locations, collection state, token count, hint highlights, and revealed map cells are part of the save, so resuming a maze preserves progress. Reset Player resets collected rewards and temporary route/map effects for the current run.
-# maze
+
+
+## Updated controls and item behavior
+
+- Move: `WASD` or arrow keys
+- Retrace one step: `Backspace` or `Ctrl+Z`
+- Reset player to the start: `Ctrl+R`
+- Generate a new maze with the current settings: `Ctrl+N`
+- Hint shards show the next route segment with a translucent fill and outline, keeping walls readable.
+- Exploration tokens are spendable: in fog-of-war modes, a token reveals only the goal marker (never the route). If the goal is already visible, a token relocates remaining collectibles.
+- Retracing is saved with the run, including the move history, so it continues to work after loading a save.

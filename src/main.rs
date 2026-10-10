@@ -30,6 +30,7 @@ struct AppState {
     hint_enabled: gtk::CheckButton,
     map_reveal_enabled: gtk::CheckButton,
     tokens_enabled: gtk::CheckButton,
+    use_token_button: gtk::Button,
     items_per_type: gtk::SpinButton,
     hint_steps: gtk::SpinButton,
     width_entry: gtk::SpinButton,
@@ -71,6 +72,7 @@ fn build_ui(app: &adw::Application) {
     let hint_enabled=gtk::CheckButton::with_label("Hint shards"); hint_enabled.set_active(true);
     let map_reveal_enabled=gtk::CheckButton::with_label("Map reveal"); map_reveal_enabled.set_active(true);
     let tokens_enabled=gtk::CheckButton::with_label("Exploration tokens"); tokens_enabled.set_active(true);
+    let use_token_button=gtk::Button::with_label("Spend token: goal / refresh items");
     let items_per_type=gtk::SpinButton::with_range(1.0,20.0,1.0); items_per_type.set_value(3.0); items_per_type.set_numeric(true);
     let hint_steps=gtk::SpinButton::with_range(1.0,20.0,1.0); hint_steps.set_value(5.0); hint_steps.set_numeric(true);
     let width_entry=gtk::SpinButton::with_range(2.0,1_000_000_000_000.0,1.0);
@@ -87,7 +89,7 @@ fn build_ui(app: &adw::Application) {
     let save_list=gtk::DropDown::from_strings(&["Autosave"]);
     let state=Rc::new(AppState { game:RefCell::new(state), save_dir:save::default_save_dir(),
         active_slot:RefCell::new("Autosave".into()), last_tick:RefCell::new(Instant::now()),
-        status,stats,canvas,trail_switch,visibility_choice,vision_radius,items_enabled,teleporter_enabled,hint_enabled,map_reveal_enabled,tokens_enabled,items_per_type,hint_steps,
+        status,stats,canvas,trail_switch,visibility_choice,vision_radius,items_enabled,teleporter_enabled,hint_enabled,map_reveal_enabled,tokens_enabled,use_token_button,items_per_type,hint_steps,
         width_entry,height_entry,paths_entry,paths_random,generation_choice,start_choice,zoom_label,save_list,
         save_names:RefCell::new(vec!["Autosave".into()]) });
 
@@ -121,7 +123,10 @@ fn build_ui(app: &adw::Application) {
     sidebar.append(&reveal_button);
     let randomize_button=gtk::Button::with_label("🎲  Randomize all options");
     sidebar.append(&randomize_button);
-    let reset_button=gtk::Button::with_label("↺  Reset player"); sidebar.append(&reset_button);
+    let action_row=gtk::Box::new(gtk::Orientation::Horizontal,6);
+    let retrace_button=gtk::Button::with_label("↶  Retrace step");
+    let reset_button=gtk::Button::with_label("↺  Reset player");
+    action_row.append(&retrace_button); action_row.append(&reset_button); sidebar.append(&action_row);
     sidebar.append(&separator()); sidebar.append(&section("DISPLAY"));
     let trail_row=gtk::Box::new(gtk::Orientation::Horizontal,8);
     let trail_label=gtk::Label::new(Some("Show visited trail")); trail_label.set_hexpand(true); trail_label.set_xalign(0.0);
@@ -137,7 +142,8 @@ fn build_ui(app: &adw::Application) {
     sidebar.append(&state.teleporter_enabled); sidebar.append(&state.hint_enabled); sidebar.append(&state.map_reveal_enabled); sidebar.append(&state.tokens_enabled);
     sidebar.append(&labeled("Collectibles per type", &state.items_per_type));
     sidebar.append(&labeled("Hint length (steps)", &state.hint_steps));
-    let items_help=gtk::Label::new(Some("Settings apply to the next maze. Teleporters are reusable; collected rewards and revealed map areas are saved with your run."));
+    sidebar.append(&state.use_token_button);
+    let items_help=gtk::Label::new(Some("Hints use a soft outline so they do not hide walls. Map reveal shows nearby cells. Collect exploration tokens, then spend one to reveal the goal marker without showing its route."));
     items_help.set_xalign(0.0); items_help.set_wrap(true); items_help.add_css_class("muted"); sidebar.append(&items_help);
     let zoom_row=gtk::Box::new(gtk::Orientation::Horizontal,6);
     let zoom_out=gtk::Button::with_label("−"); let zoom_in=gtk::Button::with_label("+");
@@ -155,7 +161,7 @@ fn build_ui(app: &adw::Application) {
     let rename_btn=gtk::Button::with_label("Rename"); let delete_btn=gtk::Button::with_label("Delete");
     save_row.append(&save_btn); save_row.append(&load_btn); sidebar.append(&save_row);
     let save_row2=gtk::Box::new(gtk::Orientation::Horizontal,6); save_row2.append(&rename_btn); save_row2.append(&delete_btn); sidebar.append(&save_row2);
-    let help=gtk::Label::new(Some("Move: WASD / arrows\nDrag: pan view\nZoom: wheel or +/-\nVisibility: full map, local vision, or exploration map\nCollect items for teleports, hints, map reveals, and tokens\nCenter on player recenters the camera\nZoom to fit all shows a whole-maze overview\nSolution is highlighted after giving up."));
+    let help=gtk::Label::new(Some("Move: WASD / arrows\nRetrace: Backspace / Ctrl+Z\nReset player: Ctrl+R\nNew maze: Ctrl+N\nDrag: pan view\nZoom: wheel or +/-\nVisibility: full map, local vision, or exploration map\nCollect items for teleports, hints, map reveals, and tokens\nCenter on player recenters the camera\nZoom to fit all shows a whole-maze overview\nSolution is highlighted after giving up."));
     help.set_xalign(0.0); help.set_wrap(true); help.add_css_class("muted"); sidebar.append(&help);
     let sidebar_viewport = gtk::Viewport::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
     sidebar_viewport.set_child(Some(&sidebar));
@@ -197,7 +203,50 @@ fn build_ui(app: &adw::Application) {
             Err(msg) => { s.status.set_text(&msg); show_error(&w, &msg); }
         }
     });
-    let s=state.clone(); reset_button.connect_clicked(move |_| { s.game.borrow_mut().reset_player(); *s.last_tick.borrow_mut()=Instant::now(); s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); });
+    let s=state.clone(); reset_button.connect_clicked(move |_| { s.game.borrow_mut().reset_player(); *s.last_tick.borrow_mut()=Instant::now(); s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); s.status.set_text("Player reset to the start"); });
+    let s=state.clone(); retrace_button.connect_clicked(move |_| {
+        let did_retrace = { s.game.borrow_mut().retrace_step() };
+        if did_retrace { s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); s.status.set_text("Retraced one step"); }
+        else { s.status.set_text("No previous step to retrace"); }
+        s.canvas.grab_focus();
+    });
+    let s=state.clone(); state.use_token_button.connect_clicked(move |_| {
+        let result = {
+            let mut g=s.game.borrow_mut();
+            if g.tokens_collected == 0 { 0 }
+            else {
+                g.tokens_collected -= 1;
+                if g.visibility_mode != VisibilityMode::FullMap && !g.goal_revealed {
+                    g.goal_revealed = true;
+                    1
+                } else {
+                    // In full-map mode (or after the goal has already been revealed),
+                    // spend the token to relocate remaining collectibles instead.
+                    let mut rng=rand::thread_rng();
+                    let mut occupied=HashSet::from([g.start,g.exit_pos,g.player]);
+                    for item in &g.items { if item.collected { occupied.insert(item.pos); } }
+                    let width=g.width; let height=g.height;
+                    for item in &mut g.items {
+                        if item.collected { continue; }
+                        let mut replacement=None;
+                        for _ in 0..256 {
+                            let candidate=Pos{x:rand::Rng::gen_range(&mut rng,0..width),y:rand::Rng::gen_range(&mut rng,0..height)};
+                            if occupied.insert(candidate) { replacement=Some(candidate); break; }
+                        }
+                        if let Some(pos)=replacement { item.pos=pos; }
+                    }
+                    2
+                }
+            }
+        };
+        match result {
+            1 => s.status.set_text("Goal revealed — no route shown"),
+            2 => s.status.set_text("Remaining items relocated"),
+            _ => s.status.set_text("Collect an exploration token first"),
+        }
+        if result != 0 { s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); }
+        s.canvas.grab_focus();
+    });
     let s=state.clone();
     let trail_switch=state.trail_switch.clone();
     trail_switch.connect_active_notify(move |sw| { s.game.borrow_mut().show_trail=sw.is_active(); s.canvas.queue_draw(); autosave_now(&s); });
@@ -279,13 +328,28 @@ fn build_ui(app: &adw::Application) {
     state.canvas.set_draw_func(move |area,cr,width,height| draw_maze(&s,area,cr,width,height));
     let keys=gtk::EventControllerKey::new();
     let s=state.clone();
+    let window_for_keys=window.clone();
     keys.connect_key_pressed(move |_,key,_,mods| {
-        if mods.contains(gdk::ModifierType::CONTROL_MASK) { return glib::Propagation::Proceed; }
+        let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
+        if ctrl && (key == gdk::Key::n || key == gdk::Key::N) {
+            start_new_maze(&s, &window_for_keys, false);
+            return glib::Propagation::Stop;
+        }
+        if ctrl && (key == gdk::Key::r || key == gdk::Key::R) {
+            s.game.borrow_mut().reset_player(); *s.last_tick.borrow_mut()=Instant::now(); s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); s.status.set_text("Player reset to the start");
+            return glib::Propagation::Stop;
+        }
+        if key == gdk::Key::BackSpace || (ctrl && (key == gdk::Key::z || key == gdk::Key::Z)) {
+            let did_retrace = { s.game.borrow_mut().retrace_step() };
+            if did_retrace { s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); s.status.set_text("Retraced one step"); } else { s.status.set_text("No previous step to retrace"); }
+            return glib::Propagation::Stop;
+        }
+        if ctrl { return glib::Propagation::Proceed; }
         let dir=match key { gdk::Key::Up|gdk::Key::w|gdk::Key::W=>Some(Direction::Up),gdk::Key::Right|gdk::Key::d|gdk::Key::D=>Some(Direction::Right),gdk::Key::Down|gdk::Key::s|gdk::Key::S=>Some(Direction::Down),gdk::Key::Left|gdk::Key::a|gdk::Key::A=>Some(Direction::Left),_=>None };
         if let Some(d)=dir { let mut g=s.game.borrow_mut(); let moved=g.move_player(d); let mut messages=Vec::new(); if moved { messages=apply_item_at_player(&mut g); } drop(g); if moved { s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); if !messages.is_empty() { s.status.set_text(&messages.join(" · ")); } if s.game.borrow().completed { s.status.set_text("Exit reached — congratulations!"); } } return glib::Propagation::Stop; }
         glib::Propagation::Proceed
     });
-    state.canvas.add_controller(keys);
+    window.add_controller(keys);
     let scroll=gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     let s=state.clone(); scroll.connect_scroll(move |_,_,dy| { let mut g=s.game.borrow_mut(); if dy<0.0 {g.zoom=(g.zoom*1.12).min(8.0)} else {g.zoom=(g.zoom/1.12).max(0.000000000001)} s.zoom_label.set_text(&zoom_text(g.zoom)); drop(g); s.canvas.queue_draw(); glib::Propagation::Stop });
     state.canvas.add_controller(scroll);
@@ -410,6 +474,7 @@ fn refresh_stats(s:&AppState) {
     let g=s.game.borrow();
     let mins=g.elapsed_ms/60_000; let secs=(g.elapsed_ms/1_000)%60;
     s.stats.set_text(&format!("Time     {mins:02}:{secs:02}\nMoves    {}\nPosition {}, {}\nSize     {} × {}\nVisited  {}\nTokens   {}",g.moves,g.player.x+1,g.player.y+1,g.width,g.height,g.visited.len(),g.tokens_collected));
+    s.use_token_button.set_sensitive(g.tokens_collected > 0);
 }
 fn draw_maze(s:&AppState,_area:&gtk::DrawingArea,cr:&cairo::Context,w:i32,h:i32) {
     let g=s.game.borrow();
@@ -460,7 +525,7 @@ fn draw_maze(s:&AppState,_area:&gtk::DrawingArea,cr:&cairo::Context,w:i32,h:i32)
                 cr.rectangle(px,py,tile.max(0.5),tile.max(0.5)); let _=cr.fill();
             }
             if g.map_revealed.contains(&p) { cr.set_source_rgba(0.18,0.48,0.68,0.34); cr.rectangle(px,py,tile.max(0.5),tile.max(0.5)); let _=cr.fill(); }
-            if g.hint_cells.contains(&p) { cr.set_source_rgb(0.22,0.92,0.95); cr.rectangle(px+tile*0.16,py+tile*0.16,(tile*0.68).max(0.5),(tile*0.68).max(0.5)); let _=cr.fill(); }
+            if g.hint_cells.contains(&p) { cr.set_source_rgba(0.18,0.88,0.92,0.22); cr.rectangle(px+tile*0.12,py+tile*0.12,(tile*0.76).max(0.5),(tile*0.76).max(0.5)); let _=cr.fill(); cr.set_source_rgba(0.30,0.92,0.96,0.78); cr.set_line_width((tile*0.07).max(0.7)); cr.rectangle(px+tile*0.12,py+tile*0.12,(tile*0.76).max(0.5),(tile*0.76).max(0.5)); let _=cr.stroke(); }
             draw_item_at(&item_map, cr, p, px, py, tile);
             if solution_cells.contains(&p) {
                 cr.set_source_rgb(0.95,0.25,0.62);
@@ -520,6 +585,7 @@ fn draw_fogged_maze(g:&MazeState, cr:&cairo::Context, w:i32, h:i32, item_map:&Ha
     // Draw exact current visibility and sample persistent map data only in the viewport.
     // Never iterate the full explored/revealed sets during a frame on a long-running maze.
     let mut cells=visible.clone();
+    if g.goal_revealed { cells.insert(g.exit()); }
     let left=(center_x-w as f64/(2.0*cell)).floor() as i64;
     let top=(center_y-h as f64/(2.0*cell)).floor() as i64;
     let view_cols=(w as f64/cell.max(0.000_001)).ceil() as i64;
@@ -534,7 +600,7 @@ fn draw_fogged_maze(g:&MazeState, cr:&cairo::Context, w:i32, h:i32, item_map:&Ha
     }
     for p in cells {
         let current=visible.contains(&p);
-        if !current && g.visibility_mode==VisibilityMode::LocalVision && !g.map_revealed.contains(&p) && !g.hint_cells.contains(&p) { continue; }
+        if !current && g.visibility_mode==VisibilityMode::LocalVision && !g.map_revealed.contains(&p) && !g.hint_cells.contains(&p) && !(g.goal_revealed && p==g.exit()) { continue; }
         let px=w as f64/2.0+(p.x as f64+0.5-center_x)*cell-cell/2.0;
         let py=h as f64/2.0+(p.y as f64+0.5-center_y)*cell-cell/2.0;
         if px+cell<0.0 || py+cell<0.0 || px>w as f64 || py>h as f64 { continue; }
@@ -546,7 +612,7 @@ fn draw_fogged_maze(g:&MazeState, cr:&cairo::Context, w:i32, h:i32, item_map:&Ha
             cr.rectangle(px+cell*0.08,py+cell*0.08,(cell*0.84).max(0.5),(cell*0.84).max(0.5)); let _=cr.fill();
         }
         if g.map_revealed.contains(&p) { cr.set_source_rgba(0.18,0.48,0.68,if current {0.28} else {0.5}); cr.rectangle(px,py,cell.max(0.5),cell.max(0.5)); let _=cr.fill(); }
-        if g.hint_cells.contains(&p) { cr.set_source_rgb(0.22,0.92,0.95); cr.rectangle(px+cell*0.16,py+cell*0.16,(cell*0.68).max(0.5),(cell*0.68).max(0.5)); let _=cr.fill(); }
+        if g.hint_cells.contains(&p) { cr.set_source_rgba(0.18,0.88,0.92,0.20); cr.rectangle(px+cell*0.12,py+cell*0.12,(cell*0.76).max(0.5),(cell*0.76).max(0.5)); let _=cr.fill(); cr.set_source_rgba(0.30,0.92,0.96,0.78); cr.set_line_width((cell*0.07).max(0.7)); cr.rectangle(px+cell*0.12,py+cell*0.12,(cell*0.76).max(0.5),(cell*0.76).max(0.5)); let _=cr.stroke(); }
         draw_item_at(item_map, cr, p, px, py, cell);
         if solution.contains(&p) {
             cr.set_source_rgb(0.95,0.25,0.62);
@@ -555,7 +621,7 @@ fn draw_fogged_maze(g:&MazeState, cr:&cairo::Context, w:i32, h:i32, item_map:&Ha
         if p==g.start && (current || g.visibility_mode==VisibilityMode::ExplorationMap && g.explored.contains(&p)) {
             cr.set_source_rgb(0.25,0.75,0.55); cr.rectangle(px+cell*0.22,py+cell*0.22,(cell*0.56).max(0.5),(cell*0.56).max(0.5)); let _=cr.fill();
         }
-        if p==g.exit() && (current || g.visibility_mode==VisibilityMode::ExplorationMap && g.explored.contains(&p)) {
+        if p==g.exit() && (g.goal_revealed || current || g.visibility_mode==VisibilityMode::ExplorationMap && g.explored.contains(&p)) {
             cr.set_source_rgb(0.98,0.72,0.28); cr.rectangle(px+cell*0.18,py+cell*0.18,(cell*0.64).max(0.5),(cell*0.64).max(0.5)); let _=cr.fill();
         }
         if p==g.player {
@@ -602,6 +668,8 @@ fn apply_item_at_player(g: &mut MazeState) -> Vec<String> {
             if p!=here && p!=g.start && p!=g.exit_pos && !g.items.iter().any(|i|i.pos==p) { destination=p; break; }
         }
         if destination!=here {
+            g.move_history.push(here);
+            g.moves = g.moves.saturating_add(1);
             g.player=destination; g.visited.insert(destination); g.reveal_visible_area();
             messages.push("Teleported to a random location".to_string());
         }
