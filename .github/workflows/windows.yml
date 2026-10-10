@@ -33,12 +33,13 @@ jobs:
         shell: msys2 {0}
         run: |
           export PATH="/c/Users/runneradmin/.cargo/bin:/ucrt64/bin:$PATH"
+          export PKG_CONFIG="/ucrt64/bin/pkg-config.exe"
           export PKG_CONFIG_PATH="/ucrt64/lib/pkgconfig:/ucrt64/share/pkgconfig"
+          export PKG_CONFIG_ALLOW_CROSS=1
 
           cargo --version
           rustc --version
-          gcc --version
-          pkg-config --modversion gtk4 libadwaita-1
+          pkg-config --modversion glib-2.0 gtk4 libadwaita-1
 
           cargo build --release --target x86_64-pc-windows-gnu
 
