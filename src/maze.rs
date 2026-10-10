@@ -46,13 +46,25 @@ fn default_item_count() -> u8 { 3 }
 fn default_hint_steps() -> u8 { 5 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub enum ItemKind { Teleporter, HintShard, MapReveal, ExplorationToken }
+pub enum ItemKind {
+    Teleporter,
+    /// Reveals the goal marker without revealing the route.
+    GoalCompass,
+    MapReveal,
+    ExplorerClone,
+    SurveyPulse,
+    TrailBeacon,
+    Echo,
+    // Legacy variants are retained so older save files still load.
+    HintShard,
+    ExplorationToken,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MazeItem {
     pub kind: ItemKind,
     pub pos: Pos,
-    /// Collectibles are consumed once. Teleporters are reusable.
+    /// Collectibles are consumed once, including one-use teleporters.
     #[serde(default)]
     pub collected: bool,
 }
@@ -94,7 +106,16 @@ pub struct MazeState {
     pub map_revealed: HashSet<Pos>,
     #[serde(default)]
     pub hint_cells: HashSet<Pos>,
-    /// Whether the goal marker has been explicitly revealed by a token.
+    /// Active clone position and remaining successful-player-move steps.
+    #[serde(default)]
+    pub clone_pos: Option<Pos>,
+    #[serde(default)]
+    pub clone_steps_left: u8,
+    #[serde(default)]
+    pub clone_previous: Option<Pos>,
+    #[serde(default)]
+    pub clone_trail: HashSet<Pos>,
+    /// Whether the goal marker has been explicitly revealed by a goal compass.
     #[serde(default)]
     pub goal_revealed: bool,
     #[serde(default)]
@@ -168,19 +189,19 @@ impl MazeState {
         let mut state = Self { schema_version: 2, algorithm_version: 2, width, height, seed, start, exit_pos, start_mode, generation_mode,
             extra_passages: extra_passages.min(100), player: start, solution: Vec::new(), facing: Direction::Right, visited, move_history: Vec::new(), moves: 0, elapsed_ms: 0,
             completed: false, show_trail: true, visibility_mode: VisibilityMode::FullMap, vision_radius: 5,
-            explored: HashSet::from([start]), map_revealed: HashSet::new(), hint_cells: HashSet::new(), goal_revealed: false,
-            items_enabled: true, teleporter_enabled: true, hint_enabled: true, map_reveal_enabled: true, tokens_enabled: true,
+            explored: HashSet::from([start]), map_revealed: HashSet::new(), hint_cells: HashSet::new(), clone_pos: None, clone_steps_left: 0, clone_previous: None, clone_trail: HashSet::new(), goal_revealed: false,
+            items_enabled: true, teleporter_enabled: true, hint_enabled: true, map_reveal_enabled: true, tokens_enabled: false,
             items_per_type: 3, items: Vec::new(), tokens_collected: 0, hint_steps: 5,
             zoom: 1.0, pan_x: 0.0, pan_y: 0.0 };
-        state.configure_items(true, true, true, true, true, 3, 5);
+        state.configure_items(true, true, true, true, false, 3, 5);
         Ok(state)
     }
-    pub fn configure_items(&mut self, enabled: bool, teleporter: bool, hint: bool, map_reveal: bool, tokens: bool, items_per_type: u8, hint_steps: u8) {
+    pub fn configure_items(&mut self, enabled: bool, teleporter: bool, compass: bool, map_reveal: bool, _tokens: bool, items_per_type: u8, hint_steps: u8) {
         self.items_enabled = enabled;
         self.teleporter_enabled = teleporter;
-        self.hint_enabled = hint;
+        self.hint_enabled = compass;
         self.map_reveal_enabled = map_reveal;
-        self.tokens_enabled = tokens;
+        self.tokens_enabled = false;
         self.items_per_type = items_per_type.clamp(1, 20);
         self.hint_steps = hint_steps.clamp(1, 20);
         self.items.clear();
@@ -206,9 +227,12 @@ impl MazeState {
         };
         if teleporter { place(ItemKind::Teleporter); }
         for _ in 0..count {
-            if hint { place(ItemKind::HintShard); }
+            if compass { place(ItemKind::GoalCompass); }
             if map_reveal { place(ItemKind::MapReveal); }
-            if tokens { place(ItemKind::ExplorationToken); }
+            place(ItemKind::ExplorerClone);
+            place(ItemKind::SurveyPulse);
+            place(ItemKind::TrailBeacon);
+            place(ItemKind::Echo);
         }
         drop(place);
         self.items = placed;
@@ -261,9 +285,32 @@ impl MazeState {
         self.moves = self.moves.saturating_add(1);
         self.visited.insert(self.player);
         self.reveal_visible_area();
+        self.advance_clone();
         self.completed = self.player == self.exit();
         true
     }
+    /// Move the active clone once per successful player move. No timer is involved.
+    pub fn advance_clone(&mut self) {
+        let Some(pos) = self.clone_pos else { return; };
+        if self.clone_steps_left == 0 { self.clone_pos = None; return; }
+        let cell = self.cell(pos);
+        let mut choices: Vec<Direction> = [Direction::Up, Direction::Right, Direction::Down, Direction::Left]
+            .into_iter().filter(|d| cell.openings & d.bit() != 0).collect();
+        if choices.len() > 1 {
+            choices.retain(|d| { let (dx,dy)=d.delta(); self.clone_previous != Some(Pos{x:pos.x+dx,y:pos.y+dy}) });
+        }
+        if choices.is_empty() { choices = [Direction::Up,Direction::Right,Direction::Down,Direction::Left].into_iter().filter(|d| cell.openings & d.bit()!=0).collect(); }
+        if !choices.is_empty() {
+            let d = choices[rand::thread_rng().gen_range(0..choices.len())];
+            let (dx,dy)=d.delta(); let next=Pos{x:pos.x+dx,y:pos.y+dy};
+            self.clone_previous=Some(pos); self.clone_pos=Some(next); self.clone_trail.insert(next);
+            // Every clone-discovered cell is permanently mapped, including its walls.
+            self.map_revealed.insert(pos); self.map_revealed.insert(next);
+        }
+        self.clone_steps_left=self.clone_steps_left.saturating_sub(1);
+        if self.clone_steps_left==0 { self.clone_pos=None; }
+    }
+
     pub fn retrace_step(&mut self) -> bool {
         let Some(previous) = self.move_history.pop() else { return false; };
         self.player = previous;
@@ -284,6 +331,7 @@ impl MazeState {
         self.explored.insert(self.player);
         self.map_revealed.clear();
         self.hint_cells.clear();
+        self.clone_pos = None; self.clone_steps_left = 0; self.clone_previous = None; self.clone_trail.clear();
         self.goal_revealed = false;
         self.tokens_collected = 0;
         for item in &mut self.items { item.collected = false; }
@@ -664,7 +712,11 @@ mod tests {
     #[test] fn item_configuration_places_distinct_items_and_roundtrips_state() {
         let mut m=MazeState::new_with_generation(30,30,54321,0,StartMode::SideToSide,GenerationMode::Whole).unwrap();
         m.configure_items(true,true,true,true,true,3,5);
-        assert_eq!(m.items.len(),10);
+        assert_eq!(m.items.len(),19);
+        for kind in [ItemKind::ExplorerClone, ItemKind::SurveyPulse, ItemKind::TrailBeacon, ItemKind::Echo] {
+            assert_eq!(m.items.iter().filter(|item| item.kind == kind).count(), 3);
+        }
+        assert!(m.items.iter().all(|item| !matches!(item.kind, ItemKind::ExplorationToken | ItemKind::HintShard)));
         let positions: HashSet<Pos> = m.items.iter().map(|item| item.pos).collect();
         assert_eq!(positions.len(),m.items.len());
         assert!(!positions.contains(&m.start));

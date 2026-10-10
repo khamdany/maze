@@ -123,17 +123,19 @@ The Display section includes three visibility modes:
 
 The vision radius is configurable from 1 to 30 maze cells. It is measured in maze cells, not screen pixels, so zooming does not change the radius. The visited trail toggle remains independent of visibility. Randomize All also randomizes the visibility mode and radius.
 
-## Items & rewards
+## Items
 
-New mazes can optionally place randomized items throughout reachable cells. The sidebar's **Items & Rewards** section lets you enable or disable the system, choose individual item types, set collectibles per type, and choose how many route steps a Hint Shard highlights. Item settings apply to the next generated maze.
+Pickups use distinct Cairo-drawn symbols (not colored dots): a swirling portal for Warp, a two-tone compass needle for Goal Compass, a folded map for Map Reveal, a tiny robot for Explorer Clone, a crystal with scan waves for Survey Pulse, a lantern for Trail Beacon, and an hourglass for Echo. Icons use a dark outline/base for contrast and are drawn independently from item behavior.
 
-- **Random teleporter** (purple): reusable; stepping on it relocates the player to another random valid cell.
-- **Hint shard** (gold): consumed on pickup; highlights the next configured number of steps along a route to the goal. Route hints are limited to mazes of at most 1,000,000 cells to avoid unsafe memory use.
-- **Map reveal** (cyan): consumed on pickup; permanently reveals a circular area around the player, even in Local Vision mode.
-- **Exploration token** (green): consumed on pickup and counted in the run statistics.
+- **Explorer Clone:** simulates a short independent walk through real maze passages from a random location and adds the route it discovers to the map.
+- **Goal Compass:** reveals the exit marker without revealing a solution route.
+- **Survey Pulse:** reveals nearby line-of-sight corridors temporarily/highlighted without permanently opening the full map.
+- **One-use Warp:** moves to a random unvisited area when possible; retrace can return to the previous position.
+- **Trail Beacon:** marks the current location for later orientation.
+- **Echo:** highlights up to twelve recent positions from your own movement history.
+- **Map Reveal:** permanently reveals a local area.
 
-Item locations, collection state, token count, hint highlights, and revealed map cells are part of the save, so resuming a maze preserves progress. Reset Player resets collected rewards and temporary route/map effects for the current run.
-
+The three visibility modes are **Full Map**, **Local Vision** (walls block sight), and **Exploration Map** (previous discoveries remain visible). The map uses different overlays for ordinary trail and revealed cells. Older saves retain legacy item kinds for compatibility.
 
 ## Updated controls and item behavior
 
@@ -141,6 +143,7 @@ Item locations, collection state, token count, hint highlights, and revealed map
 - Retrace one step: `Backspace` or `Ctrl+Z`
 - Reset player to the start: `Ctrl+R`
 - Generate a new maze with the current settings: `Ctrl+N`
-- Hint shards show the next route segment with a translucent fill and outline, keeping walls readable.
-- Exploration tokens are spendable: in fog-of-war modes, a token reveals only the goal marker (never the route). If the goal is already visible, a token relocates remaining collectibles.
+- Goal compasses reveal the goal marker without showing the route.
+- Map-reveal overlays use subtle fills and outlines to preserve wall readability.
+- One-use warps prefer unvisited cells and are included in the retrace history.
 - Retracing is saved with the run, including the move history, so it continues to work after loading a save.

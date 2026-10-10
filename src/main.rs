@@ -29,10 +29,7 @@ struct AppState {
     teleporter_enabled: gtk::CheckButton,
     hint_enabled: gtk::CheckButton,
     map_reveal_enabled: gtk::CheckButton,
-    tokens_enabled: gtk::CheckButton,
-    use_token_button: gtk::Button,
     items_per_type: gtk::SpinButton,
-    hint_steps: gtk::SpinButton,
     width_entry: gtk::SpinButton,
     height_entry: gtk::SpinButton,
     paths_entry: gtk::SpinButton,
@@ -55,7 +52,7 @@ fn build_ui(app: &adw::Application) {
         gtk::style_context_add_provider_for_display(&display,&provider,gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
     let mut initial = match MazeState::new_with_generation(20,20,rand::random(),0,StartMode::SideToSide,GenerationMode::Whole) { Ok(s)=>s, Err(e)=>panic!("{e}") };
-    initial.configure_items(true, true, true, true, true, 3, 5);
+    initial.configure_items(true, true, true, true, false, 3, 5);
     let state = initial;
     let status=gtk::Label::new(Some("Ready to explore"));
     status.set_xalign(0.0); status.add_css_class("muted");
@@ -68,13 +65,10 @@ fn build_ui(app: &adw::Application) {
     visibility_choice.set_selected(0);
     let vision_radius=gtk::SpinButton::with_range(1.0,30.0,1.0); vision_radius.set_value(5.0); vision_radius.set_numeric(true);
     let items_enabled=gtk::Switch::builder().active(true).valign(gtk::Align::Center).build();
-    let teleporter_enabled=gtk::CheckButton::with_label("Random teleporter"); teleporter_enabled.set_active(true);
-    let hint_enabled=gtk::CheckButton::with_label("Hint shards"); hint_enabled.set_active(true);
+    let teleporter_enabled=gtk::CheckButton::with_label("One-use warp (unvisited cell)"); teleporter_enabled.set_active(true);
+    let hint_enabled=gtk::CheckButton::with_label("Goal compass (reveals goal only)"); hint_enabled.set_active(true);
     let map_reveal_enabled=gtk::CheckButton::with_label("Map reveal"); map_reveal_enabled.set_active(true);
-    let tokens_enabled=gtk::CheckButton::with_label("Exploration tokens"); tokens_enabled.set_active(true);
-    let use_token_button=gtk::Button::with_label("Spend token: goal / refresh items");
     let items_per_type=gtk::SpinButton::with_range(1.0,20.0,1.0); items_per_type.set_value(3.0); items_per_type.set_numeric(true);
-    let hint_steps=gtk::SpinButton::with_range(1.0,20.0,1.0); hint_steps.set_value(5.0); hint_steps.set_numeric(true);
     let width_entry=gtk::SpinButton::with_range(2.0,1_000_000_000_000.0,1.0);
     width_entry.set_value(20.0); width_entry.set_numeric(true);
     let height_entry=gtk::SpinButton::with_range(2.0,1_000_000_000_000.0,1.0);
@@ -89,7 +83,7 @@ fn build_ui(app: &adw::Application) {
     let save_list=gtk::DropDown::from_strings(&["Autosave"]);
     let state=Rc::new(AppState { game:RefCell::new(state), save_dir:save::default_save_dir(),
         active_slot:RefCell::new("Autosave".into()), last_tick:RefCell::new(Instant::now()),
-        status,stats,canvas,trail_switch,visibility_choice,vision_radius,items_enabled,teleporter_enabled,hint_enabled,map_reveal_enabled,tokens_enabled,use_token_button,items_per_type,hint_steps,
+        status,stats,canvas,trail_switch,visibility_choice,vision_radius,items_enabled,teleporter_enabled,hint_enabled,map_reveal_enabled,items_per_type,
         width_entry,height_entry,paths_entry,paths_random,generation_choice,start_choice,zoom_label,save_list,
         save_names:RefCell::new(vec!["Autosave".into()]) });
 
@@ -139,11 +133,9 @@ fn build_ui(app: &adw::Application) {
     let item_master_row=gtk::Box::new(gtk::Orientation::Horizontal,8);
     let item_master_label=gtk::Label::new(Some("Enable items")); item_master_label.set_xalign(0.0); item_master_label.set_hexpand(true);
     item_master_row.append(&item_master_label); item_master_row.append(&state.items_enabled); sidebar.append(&item_master_row);
-    sidebar.append(&state.teleporter_enabled); sidebar.append(&state.hint_enabled); sidebar.append(&state.map_reveal_enabled); sidebar.append(&state.tokens_enabled);
-    sidebar.append(&labeled("Collectibles per type", &state.items_per_type));
-    sidebar.append(&labeled("Hint length (steps)", &state.hint_steps));
-    sidebar.append(&state.use_token_button);
-    let items_help=gtk::Label::new(Some("Hints use a soft outline so they do not hide walls. Map reveal shows nearby cells. Collect exploration tokens, then spend one to reveal the goal marker without showing its route."));
+    sidebar.append(&state.teleporter_enabled); sidebar.append(&state.hint_enabled); sidebar.append(&state.map_reveal_enabled);
+    sidebar.append(&labeled("Pickups per item type", &state.items_per_type));
+    let items_help=gtk::Label::new(Some("Teleporter: one-time jump to an unvisited location. Goal compass: reveals the goal marker, never the route. Map reveal: uncovers a nearby area. Compass and map reveal are most useful with Local vision or Exploration map."));
     items_help.set_xalign(0.0); items_help.set_wrap(true); items_help.add_css_class("muted"); sidebar.append(&items_help);
     let zoom_row=gtk::Box::new(gtk::Orientation::Horizontal,6);
     let zoom_out=gtk::Button::with_label("−"); let zoom_in=gtk::Button::with_label("+");
@@ -161,7 +153,7 @@ fn build_ui(app: &adw::Application) {
     let rename_btn=gtk::Button::with_label("Rename"); let delete_btn=gtk::Button::with_label("Delete");
     save_row.append(&save_btn); save_row.append(&load_btn); sidebar.append(&save_row);
     let save_row2=gtk::Box::new(gtk::Orientation::Horizontal,6); save_row2.append(&rename_btn); save_row2.append(&delete_btn); sidebar.append(&save_row2);
-    let help=gtk::Label::new(Some("Move: WASD / arrows\nRetrace: Backspace / Ctrl+Z\nReset player: Ctrl+R\nNew maze: Ctrl+N\nDrag: pan view\nZoom: wheel or +/-\nVisibility: full map, local vision, or exploration map\nCollect items for teleports, hints, map reveals, and tokens\nCenter on player recenters the camera\nZoom to fit all shows a whole-maze overview\nSolution is highlighted after giving up."));
+    let help=gtk::Label::new(Some("Move: WASD / arrows\nRetrace: Backspace / Ctrl+Z\nReset player: Ctrl+R\nNew maze: Ctrl+N\nDrag: pan view\nZoom: wheel or +/-\nVisibility: full map, local vision, or exploration map\nCollect distinct items: clone (moves with each player step), compass, scan, warp, beacon, and echo\nCenter on player recenters the camera\nZoom to fit all shows a whole-maze overview\nSolution is highlighted after giving up."));
     help.set_xalign(0.0); help.set_wrap(true); help.add_css_class("muted"); sidebar.append(&help);
     let sidebar_viewport = gtk::Viewport::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
     sidebar_viewport.set_child(Some(&sidebar));
@@ -208,43 +200,6 @@ fn build_ui(app: &adw::Application) {
         let did_retrace = { s.game.borrow_mut().retrace_step() };
         if did_retrace { s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); s.status.set_text("Retraced one step"); }
         else { s.status.set_text("No previous step to retrace"); }
-        s.canvas.grab_focus();
-    });
-    let s=state.clone(); state.use_token_button.connect_clicked(move |_| {
-        let result = {
-            let mut g=s.game.borrow_mut();
-            if g.tokens_collected == 0 { 0 }
-            else {
-                g.tokens_collected -= 1;
-                if g.visibility_mode != VisibilityMode::FullMap && !g.goal_revealed {
-                    g.goal_revealed = true;
-                    1
-                } else {
-                    // In full-map mode (or after the goal has already been revealed),
-                    // spend the token to relocate remaining collectibles instead.
-                    let mut rng=rand::thread_rng();
-                    let mut occupied=HashSet::from([g.start,g.exit_pos,g.player]);
-                    for item in &g.items { if item.collected { occupied.insert(item.pos); } }
-                    let width=g.width; let height=g.height;
-                    for item in &mut g.items {
-                        if item.collected { continue; }
-                        let mut replacement=None;
-                        for _ in 0..256 {
-                            let candidate=Pos{x:rand::Rng::gen_range(&mut rng,0..width),y:rand::Rng::gen_range(&mut rng,0..height)};
-                            if occupied.insert(candidate) { replacement=Some(candidate); break; }
-                        }
-                        if let Some(pos)=replacement { item.pos=pos; }
-                    }
-                    2
-                }
-            }
-        };
-        match result {
-            1 => s.status.set_text("Goal revealed — no route shown"),
-            2 => s.status.set_text("Remaining items relocated"),
-            _ => s.status.set_text("Collect an exploration token first"),
-        }
-        if result != 0 { s.canvas.queue_draw(); refresh_stats(&s); autosave_now(&s); }
         s.canvas.grab_focus();
     });
     let s=state.clone();
@@ -294,7 +249,7 @@ fn build_ui(app: &adw::Application) {
                     *s.active_slot.borrow_mut()=name;
                     let (trail, visibility, radius, width, height, paths, generation, start, item_cfg) = {
                         let g=s.game.borrow();
-                        (g.show_trail, match g.visibility_mode {VisibilityMode::FullMap=>0,VisibilityMode::LocalVision=>1,VisibilityMode::ExplorationMap=>2}, g.vision_radius, g.width, g.height, g.extra_passages, match g.generation_mode {GenerationMode::Chunked=>0,GenerationMode::Whole=>1}, match g.start_mode {StartMode::SideToSide=>0,StartMode::OutsideToCenter=>1,StartMode::Random=>2}, (g.items_enabled,g.teleporter_enabled,g.hint_enabled,g.map_reveal_enabled,g.tokens_enabled,g.items_per_type,g.hint_steps))
+                        (g.show_trail, match g.visibility_mode {VisibilityMode::FullMap=>0,VisibilityMode::LocalVision=>1,VisibilityMode::ExplorationMap=>2}, g.vision_radius, g.width, g.height, g.extra_passages, match g.generation_mode {GenerationMode::Chunked=>0,GenerationMode::Whole=>1}, match g.start_mode {StartMode::SideToSide=>0,StartMode::OutsideToCenter=>1,StartMode::Random=>2}, (g.items_enabled,g.teleporter_enabled,g.hint_enabled,g.map_reveal_enabled,g.items_per_type))
                     };
                     s.trail_switch.set_active(trail);
                     s.visibility_choice.set_selected(visibility);
@@ -302,7 +257,7 @@ fn build_ui(app: &adw::Application) {
                     s.width_entry.set_value(width as f64); s.height_entry.set_value(height as f64);
                     s.paths_entry.set_value(paths as f64); s.paths_random.set_active(false);
                     s.generation_choice.set_selected(generation); s.start_choice.set_selected(start);
-                    s.items_enabled.set_active(item_cfg.0); s.teleporter_enabled.set_active(item_cfg.1); s.hint_enabled.set_active(item_cfg.2); s.map_reveal_enabled.set_active(item_cfg.3); s.tokens_enabled.set_active(item_cfg.4); s.items_per_type.set_value(item_cfg.5 as f64); s.hint_steps.set_value(item_cfg.6 as f64);
+                    s.items_enabled.set_active(item_cfg.0); s.teleporter_enabled.set_active(item_cfg.1); s.hint_enabled.set_active(item_cfg.2); s.map_reveal_enabled.set_active(item_cfg.3); s.items_per_type.set_value(item_cfg.4 as f64);
                     set_item_controls_sensitive(&s, item_cfg.0);
                     s.canvas.queue_draw(); refresh_stats(&s); s.status.set_text("Save loaded");
                 },
@@ -407,9 +362,7 @@ fn start_new_maze<W: IsA<gtk::Window>>(s: &Rc<AppState>, parent: &W, randomize: 
         s.teleporter_enabled.set_active(rand::Rng::gen_bool(&mut rng, 0.75));
         s.hint_enabled.set_active(rand::Rng::gen_bool(&mut rng, 0.8));
         s.map_reveal_enabled.set_active(rand::Rng::gen_bool(&mut rng, 0.8));
-        s.tokens_enabled.set_active(rand::Rng::gen_bool(&mut rng, 0.8));
         s.items_per_type.set_value(rand::Rng::gen_range(&mut rng, 1..=5) as f64);
-        s.hint_steps.set_value(rand::Rng::gen_range(&mut rng, 3..=10) as f64);
         let zoom = rand::Rng::gen_range(&mut rng, 0.65..1.65);
         s.zoom_label.set_text(&zoom_text(zoom));
         (width, height, p, start_choice_value(st))
@@ -428,7 +381,7 @@ fn start_new_maze<W: IsA<gtk::Window>>(s: &Rc<AppState>, parent: &W, randomize: 
             game.show_trail = s.trail_switch.is_active();
             game.visibility_mode = match s.visibility_choice.selected() { 1=>VisibilityMode::LocalVision, 2=>VisibilityMode::ExplorationMap, _=>VisibilityMode::FullMap };
             game.vision_radius = s.vision_radius.value() as i64;
-            game.configure_items(s.items_enabled.is_active(), s.teleporter_enabled.is_active(), s.hint_enabled.is_active(), s.map_reveal_enabled.is_active(), s.tokens_enabled.is_active(), s.items_per_type.value() as u8, s.hint_steps.value() as u8);
+            game.configure_items(s.items_enabled.is_active(), s.teleporter_enabled.is_active(), s.hint_enabled.is_active(), s.map_reveal_enabled.is_active(), false, s.items_per_type.value() as u8, 5);
             game.reveal_visible_area();
             if randomize { game.zoom = s.zoom_label.text().trim_end_matches('%').parse::<f64>().unwrap_or(100.0) / 100.0; }
             *s.game.borrow_mut() = game; *s.last_tick.borrow_mut() = Instant::now();
@@ -466,15 +419,12 @@ fn set_item_controls_sensitive(s: &AppState, enabled: bool) {
     s.teleporter_enabled.set_sensitive(enabled);
     s.hint_enabled.set_sensitive(enabled);
     s.map_reveal_enabled.set_sensitive(enabled);
-    s.tokens_enabled.set_sensitive(enabled);
     s.items_per_type.set_sensitive(enabled);
-    s.hint_steps.set_sensitive(enabled);
 }
 fn refresh_stats(s:&AppState) {
     let g=s.game.borrow();
     let mins=g.elapsed_ms/60_000; let secs=(g.elapsed_ms/1_000)%60;
-    s.stats.set_text(&format!("Time     {mins:02}:{secs:02}\nMoves    {}\nPosition {}, {}\nSize     {} × {}\nVisited  {}\nTokens   {}",g.moves,g.player.x+1,g.player.y+1,g.width,g.height,g.visited.len(),g.tokens_collected));
-    s.use_token_button.set_sensitive(g.tokens_collected > 0);
+    s.stats.set_text(&format!("Time     {mins:02}:{secs:02}\nMoves    {}\nPosition {}, {}\nSize     {} × {}\nVisited  {}",g.moves,g.player.x+1,g.player.y+1,g.width,g.height,g.visited.len()));
 }
 fn draw_maze(s:&AppState,_area:&gtk::DrawingArea,cr:&cairo::Context,w:i32,h:i32) {
     let g=s.game.borrow();
@@ -524,7 +474,7 @@ fn draw_maze(s:&AppState,_area:&gtk::DrawingArea,cr:&cairo::Context,w:i32,h:i32)
                 cr.set_source_rgb(0.12,0.31,0.29);
                 cr.rectangle(px,py,tile.max(0.5),tile.max(0.5)); let _=cr.fill();
             }
-            if g.map_revealed.contains(&p) { cr.set_source_rgba(0.18,0.48,0.68,0.34); cr.rectangle(px,py,tile.max(0.5),tile.max(0.5)); let _=cr.fill(); }
+            if g.map_revealed.contains(&p) { cr.set_source_rgba(0.18,0.48,0.68,0.10); cr.rectangle(px,py,tile.max(0.5),tile.max(0.5)); let _=cr.fill(); cr.set_source_rgba(0.24,0.70,0.88,0.35); cr.set_line_width((tile*0.045).max(0.35)); cr.rectangle(px+tile*0.05,py+tile*0.05,(tile*0.90).max(0.5),(tile*0.90).max(0.5)); let _=cr.stroke(); }
             if g.hint_cells.contains(&p) { cr.set_source_rgba(0.18,0.88,0.92,0.22); cr.rectangle(px+tile*0.12,py+tile*0.12,(tile*0.76).max(0.5),(tile*0.76).max(0.5)); let _=cr.fill(); cr.set_source_rgba(0.30,0.92,0.96,0.78); cr.set_line_width((tile*0.07).max(0.7)); cr.rectangle(px+tile*0.12,py+tile*0.12,(tile*0.76).max(0.5),(tile*0.76).max(0.5)); let _=cr.stroke(); }
             draw_item_at(&item_map, cr, p, px, py, tile);
             if solution_cells.contains(&p) {
@@ -532,8 +482,13 @@ fn draw_maze(s:&AppState,_area:&gtk::DrawingArea,cr:&cairo::Context,w:i32,h:i32)
                 cr.rectangle(px+tile*0.18,py+tile*0.18,(tile*0.64).max(0.5),(tile*0.64).max(0.5));let _=cr.fill();
             }
             if p==g.start { cr.set_source_rgb(0.25,0.75,0.55); cr.rectangle(px+tile*0.22,py+tile*0.22,(tile*0.56).max(0.5),(tile*0.56).max(0.5));let _=cr.fill(); }
-            if p==g.exit() { cr.set_source_rgb(0.98,0.72,0.28); cr.rectangle(px+tile*0.18,py+tile*0.18,(tile*0.64).max(0.5),(tile*0.64).max(0.5));let _=cr.fill(); }
+            if p==g.exit() {
+                cr.set_source_rgb(0.98,0.72,0.28);
+                cr.rectangle(px+tile*0.18,py+tile*0.18,(tile*0.64).max(0.5),(tile*0.64).max(0.5)); let _=cr.fill();
+                if g.goal_revealed { cr.set_source_rgba(1.0,0.88,0.35,0.95); cr.set_line_width((tile*0.12).max(1.0)); cr.rectangle(px+tile*0.06,py+tile*0.06,(tile*0.88).max(0.5),(tile*0.88).max(0.5)); let _=cr.stroke(); }
+            }
             if p==g.player && cell>=2.0 { cr.set_source_rgb(0.48,0.75,1.0); cr.arc(px+tile/2.0,py+tile/2.0,(tile*0.29).max(1.0),0.0,std::f64::consts::TAU);let _=cr.fill(); }
+            if g.clone_pos==Some(p) && cell>=2.0 { draw_robot_marker(cr,px,py,tile); }
 
             // Draw sampled wall topology at every zoom. At low zoom each tile is an
             // overview sample; at high zoom it is the exact cell geometry.
@@ -611,7 +566,7 @@ fn draw_fogged_maze(g:&MazeState, cr:&cairo::Context, w:i32, h:i32, item_map:&Ha
             if current { cr.set_source_rgb(0.12,0.31,0.29); } else { cr.set_source_rgb(0.09,0.19,0.19); }
             cr.rectangle(px+cell*0.08,py+cell*0.08,(cell*0.84).max(0.5),(cell*0.84).max(0.5)); let _=cr.fill();
         }
-        if g.map_revealed.contains(&p) { cr.set_source_rgba(0.18,0.48,0.68,if current {0.28} else {0.5}); cr.rectangle(px,py,cell.max(0.5),cell.max(0.5)); let _=cr.fill(); }
+        if g.map_revealed.contains(&p) { cr.set_source_rgba(0.18,0.48,0.68,if current {0.18} else {0.24}); cr.rectangle(px,py,cell.max(0.5),cell.max(0.5)); let _=cr.fill(); cr.set_source_rgba(0.24,0.70,0.88,0.50); cr.set_line_width((cell*0.045).max(0.35)); cr.rectangle(px+cell*0.05,py+cell*0.05,(cell*0.90).max(0.5),(cell*0.90).max(0.5)); let _=cr.stroke(); }
         if g.hint_cells.contains(&p) { cr.set_source_rgba(0.18,0.88,0.92,0.20); cr.rectangle(px+cell*0.12,py+cell*0.12,(cell*0.76).max(0.5),(cell*0.76).max(0.5)); let _=cr.fill(); cr.set_source_rgba(0.30,0.92,0.96,0.78); cr.set_line_width((cell*0.07).max(0.7)); cr.rectangle(px+cell*0.12,py+cell*0.12,(cell*0.76).max(0.5),(cell*0.76).max(0.5)); let _=cr.stroke(); }
         draw_item_at(item_map, cr, p, px, py, cell);
         if solution.contains(&p) {
@@ -623,14 +578,37 @@ fn draw_fogged_maze(g:&MazeState, cr:&cairo::Context, w:i32, h:i32, item_map:&Ha
         }
         if p==g.exit() && (g.goal_revealed || current || g.visibility_mode==VisibilityMode::ExplorationMap && g.explored.contains(&p)) {
             cr.set_source_rgb(0.98,0.72,0.28); cr.rectangle(px+cell*0.18,py+cell*0.18,(cell*0.64).max(0.5),(cell*0.64).max(0.5)); let _=cr.fill();
+            if g.goal_revealed {
+                // Keep the compass effect recognizable even when the maze is zoomed out.
+                cr.set_source_rgba(1.0,0.92,0.48,0.98);
+                cr.set_line_width((cell*0.14).max(1.0).min(4.0));
+                cr.rectangle(px+cell*0.04,py+cell*0.04,(cell*0.92).max(1.0),(cell*0.92).max(1.0));
+                let _=cr.stroke();
+                if cell >= 5.0 {
+                    cr.set_source_rgb(0.12,0.09,0.03);
+                    cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+                    cr.set_font_size((cell*0.55).min(18.0).max(4.0));
+                    cr.move_to(px+cell*0.27,py+cell*0.70);
+                    let _=cr.show_text("G");
+                }
+            }
         }
         if p==g.player {
             cr.set_source_rgb(0.48,0.75,1.0); cr.arc(px+cell/2.0,py+cell/2.0,(cell*0.29).max(1.0),0.0,std::f64::consts::TAU); let _=cr.fill();
         }
+        if g.clone_pos==Some(p) { draw_robot_marker(cr,px,py,cell); }
         if cell>=0.65 {
             let c=g.cell(p);
-            if current { cr.set_source_rgb(0.70,0.79,0.91); } else { cr.set_source_rgb(0.28,0.35,0.45); }
-            cr.set_line_width((cell*0.075).max(0.5).min(2.0));
+            // Revealed geometry must stay easy to read over the blue Map Reveal overlay.
+            // Use a high-contrast wall color for revealed cells instead of the subdued
+            // unexplored-wall color; openings remain unpainted, so no passages are invented.
+            if g.map_revealed.contains(&p) {
+                cr.set_source_rgb(0.58,0.78,0.91);
+                cr.set_line_width((cell*0.095).max(0.8).min(2.5));
+            } else {
+                if current { cr.set_source_rgb(0.76,0.83,0.93); } else { cr.set_source_rgb(0.35,0.43,0.55); }
+                cr.set_line_width((cell*0.075).max(0.5).min(2.0));
+            }
             for (d,bit) in [(Direction::Up,1u8),(Direction::Right,2),(Direction::Down,4),(Direction::Left,8)] {
                 if c.openings & bit==0 { match d {
                     Direction::Up=>{cr.move_to(px,py);cr.line_to(px+cell,py)},
@@ -643,51 +621,131 @@ fn draw_fogged_maze(g:&MazeState, cr:&cairo::Context, w:i32, h:i32, item_map:&Ha
         }
     }
 }
+fn draw_robot_marker(cr:&cairo::Context,x:f64,y:f64,cell:f64) {
+    if cell < 3.0 { return; }
+    let cx=x+cell/2.0; let cy=y+cell/2.0; let r=(cell*0.29).max(1.2);
+    cr.set_source_rgb(0.22,0.92,0.86); cr.arc(cx,cy,r,0.0,std::f64::consts::TAU); let _=cr.fill();
+    cr.set_source_rgb(0.03,0.10,0.15); cr.arc(cx-r*0.34,cy-r*0.10,(r*0.12).max(0.5),0.0,std::f64::consts::TAU); let _=cr.fill();
+    cr.arc(cx+r*0.34,cy-r*0.10,(r*0.12).max(0.5),0.0,std::f64::consts::TAU); let _=cr.fill();
+    cr.set_source_rgb(0.90,1.0,0.98); cr.set_line_width((cell*0.045).max(0.5)); cr.move_to(cx,cy-r); cr.line_to(cx,cy-r*1.35); let _=cr.stroke();
+}
+
 fn draw_item_at(item_map: &HashMap<Pos,ItemKind>, cr: &cairo::Context, p: Pos, x: f64, y: f64, cell: f64) {
     if cell < 3.0 { return; }
     let Some(kind) = item_map.get(&p) else { return; };
+    let cx=x+cell/2.0; let cy=y+cell/2.0; let r=(cell*0.34).max(1.5);
+    cr.save().ok();
+    cr.set_line_width((cell*0.075).max(0.7));
+    // A dark, outlined token base keeps every item readable against both floor and trail.
+    cr.set_source_rgba(0.025,0.04,0.07,0.92); cr.arc(cx,cy,r*1.20,0.0,std::f64::consts::TAU); let _=cr.fill();
     match kind {
-        ItemKind::Teleporter => cr.set_source_rgb(0.78,0.38,1.0),
-        ItemKind::HintShard => cr.set_source_rgb(1.0,0.78,0.25),
-        ItemKind::MapReveal => cr.set_source_rgb(0.28,0.9,0.92),
-        ItemKind::ExplorationToken => cr.set_source_rgb(0.45,0.95,0.52),
+        ItemKind::Teleporter => { // swirling portal: ring + inner swirl
+            cr.set_source_rgb(0.76,0.35,1.0); cr.arc(cx,cy,r*0.86,0.0,std::f64::consts::TAU); let _=cr.stroke();
+            cr.set_source_rgb(0.92,0.68,1.0); cr.arc(cx-r*0.12,cy+r*0.08,r*0.42,-1.0,4.5); let _=cr.stroke();
+            cr.set_source_rgb(0.55,0.18,0.88); cr.arc(cx,cy,r*0.18,0.0,std::f64::consts::TAU); let _=cr.fill();
+        },
+        ItemKind::GoalCompass | ItemKind::HintShard | ItemKind::ExplorationToken => { // compass needle
+            cr.set_source_rgb(1.0,0.73,0.22); cr.arc(cx,cy,r*0.92,0.0,std::f64::consts::TAU); let _=cr.stroke();
+            cr.move_to(cx,cy-r*0.70); cr.line_to(cx+r*0.25,cy+r*0.10); cr.line_to(cx,cy-r*0.03); cr.close_path();
+            cr.set_source_rgb(1.0,0.92,0.58); let _=cr.fill();
+            cr.move_to(cx,cy+r*0.70); cr.line_to(cx-r*0.25,cy-r*0.10); cr.line_to(cx,cy+r*0.03); cr.close_path();
+            cr.set_source_rgb(0.92,0.27,0.30); let _=cr.fill();
+        },
+        ItemKind::MapReveal => { // folded map with marked X
+            cr.set_source_rgb(0.20,0.85,0.92); cr.move_to(cx-r*0.85,cy-r*0.55); cr.line_to(cx-r*0.25,cy-r*0.75); cr.line_to(cx+r*0.25,cy-r*0.48); cr.line_to(cx+r*0.85,cy-r*0.70); cr.line_to(cx+r*0.85,cy+r*0.55); cr.line_to(cx+r*0.25,cy+r*0.75); cr.line_to(cx-r*0.25,cy+r*0.48); cr.line_to(cx-r*0.85,cy+r*0.70); cr.close_path(); let _=cr.stroke();
+            cr.move_to(cx-r*0.20,cy-r*0.16); cr.line_to(cx+r*0.20,cy+r*0.20); cr.move_to(cx+r*0.20,cy-r*0.16); cr.line_to(cx-r*0.20,cy+r*0.20); let _=cr.stroke();
+        },
+        ItemKind::ExplorerClone => { // little robot head
+            cr.set_source_rgb(0.30,0.80,1.0); cr.rectangle(cx-r*0.72,cy-r*0.55,r*1.44,r*1.12); let _=cr.fill();
+            cr.set_source_rgb(0.025,0.06,0.10); cr.rectangle(cx-r*0.43,cy-r*0.18,r*0.22,r*0.25); let _=cr.fill(); cr.rectangle(cx+r*0.20,cy-r*0.18,r*0.22,r*0.25); let _=cr.fill();
+            cr.set_source_rgb(0.55,0.91,1.0); cr.move_to(cx,cy-r*0.55); cr.line_to(cx,cy-r*0.95); cr.stroke().ok(); cr.arc(cx,cy-r*0.98,r*0.12,0.0,std::f64::consts::TAU); let _=cr.fill();
+            cr.move_to(cx-r*0.48,cy+r*0.76); cr.line_to(cx-r*0.25,cy+r*0.55); cr.line_to(cx+r*0.25,cy+r*0.55); cr.line_to(cx+r*0.48,cy+r*0.76); let _=cr.stroke();
+        },
+        ItemKind::SurveyPulse => { // crystal with radiating waves
+            cr.set_source_rgb(0.28,0.88,1.0); cr.move_to(cx,cy-r); cr.line_to(cx+r*0.48,cy); cr.line_to(cx,cy+r*0.78); cr.line_to(cx-r*0.48,cy); cr.close_path(); let _=cr.fill();
+            cr.set_source_rgb(0.65,0.96,1.0); cr.arc(cx,cy,r*1.08,-0.8,0.8); let _=cr.stroke(); cr.arc(cx,cy,r*1.08,2.35,3.95); let _=cr.stroke();
+        },
+        ItemKind::TrailBeacon => { // lantern body + handle
+            cr.set_source_rgb(1.0,0.58,0.17); cr.arc(cx,cy-r*0.52,r*0.34,std::f64::consts::PI,0.0); let _=cr.stroke();
+            cr.set_source_rgb(1.0,0.66,0.20); cr.rectangle(cx-r*0.52,cy-r*0.35,r*1.04,r*1.0); let _=cr.fill();
+            cr.set_source_rgb(1.0,0.90,0.48); cr.move_to(cx,cy-r*0.20); cr.line_to(cx+r*0.20,cy+r*0.15); cr.line_to(cx,cy+r*0.43); cr.line_to(cx-r*0.20,cy+r*0.15); cr.close_path(); let _=cr.fill();
+        },
+        ItemKind::Echo => { // hourglass
+            cr.set_source_rgb(0.40,0.70,1.0); cr.move_to(cx-r*0.65,cy-r*0.78); cr.line_to(cx+r*0.65,cy-r*0.78); cr.line_to(cx-r*0.10,cy); cr.line_to(cx+r*0.65,cy+r*0.78); cr.line_to(cx-r*0.65,cy+r*0.78); cr.line_to(cx+r*0.10,cy); cr.close_path(); let _=cr.stroke();
+            cr.move_to(cx-r*0.28,cy+r*0.40); cr.line_to(cx+r*0.28,cy+r*0.40); cr.line_to(cx,cy+r*0.12); cr.close_path(); let _=cr.fill();
+        },
     }
-    cr.arc(x+cell/2.0,y+cell/2.0,(cell*0.23).max(1.2),0.0,std::f64::consts::TAU); let _=cr.fill();
+    let _=cr.restore();
 }
 
 fn apply_item_at_player(g: &mut MazeState) -> Vec<String> {
     let mut messages = Vec::new();
     let here = g.player;
-    // Teleporter is reusable and relocates the player to a random, different cell.
+    // A teleporter is a one-use exploration shortcut; prefer a cell the player has not visited.
     let teleporter_here = g.items.iter().any(|i| i.kind==ItemKind::Teleporter && i.pos==here && !i.collected);
     if teleporter_here {
         let mut rng = rand::thread_rng();
         let mut destination = here;
         for _ in 0..128 {
             let p=Pos{x:rand::Rng::gen_range(&mut rng,0..g.width),y:rand::Rng::gen_range(&mut rng,0..g.height)};
-            if p!=here && p!=g.start && p!=g.exit_pos && !g.items.iter().any(|i|i.pos==p) { destination=p; break; }
+            if p!=here && p!=g.start && p!=g.exit_pos && !g.visited.contains(&p) && !g.items.iter().any(|i|i.pos==p && !i.collected) { destination=p; break; }
+        }
+        if destination==here {
+            for _ in 0..128 {
+                let p=Pos{x:rand::Rng::gen_range(&mut rng,0..g.width),y:rand::Rng::gen_range(&mut rng,0..g.height)};
+                if p!=here && p!=g.start && p!=g.exit_pos && !g.items.iter().any(|i|i.pos==p && !i.collected) { destination=p; break; }
+            }
         }
         if destination!=here {
+            if let Some(item)=g.items.iter_mut().find(|i|i.kind==ItemKind::Teleporter && i.pos==here && !i.collected) { item.collected=true; }
             g.move_history.push(here);
             g.moves = g.moves.saturating_add(1);
             g.player=destination; g.visited.insert(destination); g.reveal_visible_area();
-            messages.push("Teleported to a random location".to_string());
+            messages.push("Warped to an unvisited area".to_string());
         }
     }
     let here=g.player;
     let picked: Vec<(usize,ItemKind)> = g.items.iter().enumerate().filter(|(_,i)|i.pos==here && !i.collected && i.kind!=ItemKind::Teleporter).map(|(n,i)|(n,i.kind)).collect();
     for (index,kind) in picked {
         match kind {
-            ItemKind::HintShard => {
-                match find_solution(g) {
-                    Ok(path) => {
-                        g.hint_cells.clear();
-                        for p in path.into_iter().skip(1).take(g.hint_steps as usize) { g.hint_cells.insert(p); }
-                        g.items[index].collected=true;
-                        messages.push(format!("Hint revealed: next {} steps",g.hint_cells.len()));
-                    }
-                    Err(_) => messages.push("Hint unavailable for this very large maze".to_string()),
-                }
+            ItemKind::GoalCompass | ItemKind::HintShard | ItemKind::ExplorationToken => {
+                // Legacy HintShard / ExplorationToken pickups are migrated in-place:
+                // both now act as a compass and never reveal a route.
+                // Compass discovery is independent of exploration, scan, beacon, and echo overlays.
+                // Never clear previously discovered cells or their visual markers when collecting it.
+                g.goal_revealed=true;
+                g.items[index].collected=true;
+                messages.push("Goal revealed — route remains hidden".to_string());
+            }
+            ItemKind::ExplorerClone => {
+                let mut rng=rand::thread_rng();
+                let mut clone=Pos{x:rand::Rng::gen_range(&mut rng,0..g.width),y:rand::Rng::gen_range(&mut rng,0..g.height)};
+                if clone==g.player { clone=Pos{x:(clone.x+1).rem_euclid(g.width),y:clone.y}; }
+                let lifetime=rand::Rng::gen_range(&mut rng,15..=40);
+                g.clone_pos=Some(clone); g.clone_steps_left=lifetime; g.clone_previous=None;
+                g.clone_trail.clear(); g.clone_trail.insert(clone); g.map_revealed.insert(clone);
+                g.items[index].collected=true;
+                messages.push(format!("Explorer clone deployed — {lifetime} steps of life; moves with you"));
+            }
+            ItemKind::SurveyPulse => {
+                let radius=g.vision_radius.saturating_mul(3).max(10).min(45);
+                for dy in -radius..=radius { for dx in -radius..=radius {
+                    if dx*dx+dy*dy>radius*radius {continue;}
+                    let p=Pos{x:g.player.x+dx,y:g.player.y+dy};
+                    if p.x>=0 && p.y>=0 && p.x<g.width && p.y<g.height && g.has_line_of_sight(g.player,p) { g.hint_cells.insert(p); }
+                }}
+                g.items[index].collected=true;
+                messages.push("Survey pulse revealed nearby corridors".to_string());
+            }
+            ItemKind::TrailBeacon => {
+                g.hint_cells.insert(g.player);
+                g.items[index].collected=true;
+                messages.push("Trail beacon marked this location".to_string());
+            }
+            ItemKind::Echo => {
+                for p in g.move_history.iter().rev().take(12) { g.hint_cells.insert(*p); }
+                g.items[index].collected=true;
+                messages.push("Echo highlighted your recent route".to_string());
             }
             ItemKind::MapReveal => {
                 let radius=g.vision_radius.saturating_mul(2).max(8).min(30);
@@ -698,10 +756,6 @@ fn apply_item_at_player(g: &mut MazeState) -> Vec<String> {
                 }}
                 g.items[index].collected=true;
                 messages.push("Map area revealed".to_string());
-            }
-            ItemKind::ExplorationToken => {
-                g.items[index].collected=true; g.tokens_collected=g.tokens_collected.saturating_add(1);
-                messages.push(format!("Exploration token collected ({})",g.tokens_collected));
             }
             ItemKind::Teleporter => {}
         }
