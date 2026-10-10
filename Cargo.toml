@@ -1,0 +1,23 @@
+[package]
+name = "maze"
+version = "0.1.0"
+edition = "2021"
+description = "A native, offline Linux maze game with deterministic chunk generation and resumable saves"
+license = "MIT"
+rust-version = "1.80"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.9", features = ["v4_8"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_4"] }
+gio = "0.20"
+glib = "0.20"
+cairo-rs = { version = "0.20", features = ["use_glib"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+rand_chacha = "0.3"
+thiserror = "1"
+directories = "5"
+
+[dev-dependencies]
+tempfile = "3"

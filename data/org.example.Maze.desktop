@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Maze
+Comment=Explore an endless, randomly generated maze
+Exec=maze
+Icon=org.example.Maze
+Terminal=false
+Categories=Game;LogicGame;
+StartupNotify=true
