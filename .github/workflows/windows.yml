@@ -1,25 +1,25 @@
-
-name: Build Maze for Windows
+name: Windows portable build
 
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/package-windows.sh'
+      - '.github/workflows/windows.yml'
 
 jobs:
   build-windows:
     runs-on: windows-latest
-
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
-
-      - name: Install GTK dependencies
-        uses: msys2/setup-msys2@v2
+      - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
@@ -28,23 +28,21 @@ jobs:
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-pkgconf
-
-      - name: Build Maze
-        shell: msys2 {0}
-        run: |
-          export PATH="/c/Users/runneradmin/.cargo/bin:/ucrt64/bin:$PATH"
-          export PKG_CONFIG="/ucrt64/bin/pkg-config.exe"
-          export PKG_CONFIG_PATH="/ucrt64/lib/pkgconfig:/ucrt64/share/pkgconfig"
-          export PKG_CONFIG_ALLOW_CROSS=1
-
-          cargo --version
-          rustc --version
-          pkg-config --modversion glib-2.0 gtk4 libadwaita-1
-
-          cargo build --release --target x86_64-pc-windows-gnu
-
-      - name: Upload executable
+            zip
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - name: Build Windows executable
+        env:
+          PKG_CONFIG: /ucrt64/bin/pkg-config.exe
+          PKG_CONFIG_PATH: /ucrt64/lib/pkgconfig:/ucrt64/share/pkgconfig
+          PKG_CONFIG_ALLOW_CROSS: '1'
+        run: cargo build --release --target x86_64-pc-windows-gnu
+      - name: Assemble portable package
+        run: bash scripts/package-windows.sh
+      - name: Upload portable Windows ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: maze-windows-x64
-          path: target/x86_64-pc-windows-gnu/release/maze.exe
+          name: Maze-Windows-Portable
+          path: dist/Maze-Windows-Portable.zip
+          if-no-files-found: error
